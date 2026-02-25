@@ -1,0 +1,26 @@
+# Bitcoin network: bitcoin, testnet, signet, regtest
+network = "regtest"
+
+# Path for wallet data (SQLite database, logs, etc.)
+storage_path = "/tmp/orange-wallet"
+
+# BIP39 mnemonic seed phrase (12 or 24 words)
+mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+
+# Blockchain data source
+[chain_source]
+type = "esplora"                          # esplora, electrum, or bitcoind_rpc
+url = "https://mutinynet.com/api"
+# username = "user"                       # optional, for esplora basic auth
+# password = "pass"                       # optional, for esplora basic auth
+
+# Lightning Service Provider
+[lsp]
+address = "185.150.162.100:3551"
+node_id = "02a88abd44b3cfc9c0eb7cd93f232dc473de4f66bcea0ee518be70c3b804c90201"
+# token = "optional-auth-token"           # optional LSP auth token
+
+# Spark trusted wallet backend
+[spark]
+sync_interval_secs = 60
+prefer_spark_over_lightning = false
