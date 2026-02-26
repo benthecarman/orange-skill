@@ -91,13 +91,16 @@ When webhooks are configured, the daemon POSTs each event as JSON to every webho
 
 ```sh
 orange daemon \
-  --webhook https://your-app.example.com/payments \
-  --webhook https://chat.example.com/notify
+  --webhook "https://your-app.example.com/payments|your-secret-token" \
+  --webhook "https://chat.example.com/notify"
 ```
+
+Each `--webhook` value is a URL, optionally followed by `|token`. When a token is provided, it's sent as `Authorization: Bearer <token>` in the POST header so your endpoint can verify requests are authentic. Each webhook can have its own token (or none).
 
 Your webhook endpoint should:
 
 - Accept `POST` requests with `Content-Type: application/json`
+- Verify the `Authorization: Bearer <token>` header if a token is configured
 - Return any 2xx status code to acknowledge receipt
 - Respond quickly — the daemon fires webhooks in parallel and won't block on slow responses, but non-2xx status codes and connection errors are logged to stderr
 

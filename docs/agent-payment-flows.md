@@ -11,8 +11,11 @@ The basic pattern: generate a unique invoice per order, store the payment hash, 
 1. Start the daemon with a webhook pointing at your webstore backend:
 
 ```sh
-orange daemon --webhook https://your-store.example.com/api/payments
+orange daemon \
+  --webhook "https://your-store.example.com/api/payments|your-secret-token"
 ```
+
+The `|token` suffix adds an `Authorization: Bearer your-secret-token` header to every POST so your backend can verify requests are authentic.
 
 2. Optionally register a lightning address for your store:
 

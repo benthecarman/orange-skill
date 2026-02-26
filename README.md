@@ -45,8 +45,8 @@ node_id = "021deaa26ce6bb7cc63bd30e83a2bba1c0368269fa3bb9b616a24f40d941ac7d32"
 ```sh
 # With webhooks — events are POSTed to your endpoints automatically
 orange daemon \
-  --webhook https://your-app.example.com/payments \
-  --webhook https://chat.example.com/notify
+  --webhook "https://your-app.example.com/payments|your-secret-token" \
+  --webhook "https://chat.example.com/notify"
 
 # Or without webhooks — poll events manually with get-event/event-handled
 orange daemon
@@ -77,7 +77,7 @@ orange balance
 
 The daemon POSTs a JSON body to each `--webhook` URL whenever a wallet event occurs. Your endpoint should accept `POST` requests with `Content-Type: application/json` and return any 2xx status code. Non-2xx responses and connection errors are logged to stderr but don't block the daemon.
 
-Multiple `--webhook` flags fan out events to different services in parallel (e.g. one for your webstore, one for chat notifications).
+Each webhook can include an optional Bearer token for authentication: `--webhook "url|token"`. Multiple `--webhook` flags fan out events to different services in parallel, each with its own auth.
 
 When no webhooks are configured, events accumulate in the SDK's persistent queue. Poll them with `get-event` and acknowledge with `event-handled`.
 

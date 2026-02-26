@@ -63,7 +63,7 @@ enum Command {
     },
     /// Run as a long-lived daemon, listening for wallet events
     Daemon {
-        /// URLs to POST event JSON to (can be specified multiple times)
+        /// Webhook URL, optionally with a Bearer token: "url" or "url|token"
         #[arg(long)]
         webhook: Vec<String>,
     },
@@ -341,12 +341,25 @@ async fn cmd_register_lightning_address(
 
 async fn cmd_daemon(wallet: &Wallet, webhooks: &[String]) {
     let client = reqwest::Client::new();
-    let has_webhooks = !webhooks.is_empty();
+
+    // Parse "url|token" format
+    let hooks: Vec<(String, Option<String>)> = webhooks
+        .iter()
+        .map(|w| match w.split_once('|') {
+            Some((url, token)) => (url.to_string(), Some(token.to_string())),
+            None => (w.clone(), None),
+        })
+        .collect();
+    let has_webhooks = !hooks.is_empty();
 
     eprintln!("Daemon started");
     if has_webhooks {
-        for url in webhooks {
-            eprintln!("Webhook: {url}");
+        for (url, token) in &hooks {
+            if token.is_some() {
+                eprintln!("Webhook: {url} (auth: Bearer token)");
+            } else {
+                eprintln!("Webhook: {url}");
+            }
         }
     } else {
         eprintln!("No webhooks configured, events will queue until consumed via get-event/event-handled");
@@ -364,12 +377,17 @@ async fn cmd_daemon(wallet: &Wallet, webhooks: &[String]) {
                 let value = serialize_event(&event, timestamp);
 
                 // POST to all webhooks in parallel, fire-and-forget
-                for url in webhooks {
+                for (url, token) in &hooks {
                     let client = client.clone();
                     let url = url.clone();
                     let body = value.clone();
+                    let token = token.clone();
                     tokio::spawn(async move {
-                        match client.post(&url).json(&body).send().await {
+                        let mut req = client.post(&url).json(&body);
+                        if let Some(ref t) = token {
+                            req = req.bearer_auth(t);
+                        }
+                        match req.send().await {
                             Ok(resp) if !resp.status().is_success() => {
                                 eprintln!("Webhook {url} returned {}", resp.status());
                             }
