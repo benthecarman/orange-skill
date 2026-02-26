@@ -24,6 +24,7 @@ node_id = "02a88abd44b3cfc9c0eb7cd93f232dc473de4f66bcea0ee518be70c3b804c90201"
 [spark]
 sync_interval_secs = 60
 prefer_spark_over_lightning = false
+# lnurl_domain = "breez.tips"
 ```
 
 Pass the config path with `--config`:
@@ -213,6 +214,39 @@ orange estimate-fee <payment>
 }
 ```
 
+### lightning-address
+
+Get the wallet's lightning address, if one has been registered.
+
+```
+orange lightning-address
+```
+
+```json
+{
+  "lightning_address": "alice@breez.tips"
+}
+```
+
+Returns `null` if no lightning address is registered.
+
+### register-lightning-address
+
+Register a lightning address for this wallet. The address will be `<name>@<lnurl_domain>` (default domain: `breez.tips`).
+
+```
+orange register-lightning-address <name>
+```
+
+```json
+{
+  "registered": true,
+  "lightning_address": "alice@breez.tips"
+}
+```
+
+Once registered, anyone can pay you using the lightning address. The domain is configured via `lnurl_domain` in the `[spark]` config section.
+
 ## Common Workflows
 
 **Check balance then receive:**
@@ -228,6 +262,12 @@ orange parse "lnbc500u1p..."    # inspect first
 orange estimate-fee "lnbc500u1p..."  # check fee
 orange send "lnbc500u1p..."     # pay
 orange balance                   # verify
+```
+
+**Set up a lightning address:**
+```sh
+orange register-lightning-address "alice"  # register alice@breez.tips
+orange lightning-address                   # verify it's set
 ```
 
 **Monitor wallet:**

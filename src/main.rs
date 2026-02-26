@@ -53,6 +53,13 @@ enum Command {
         /// Payment string to estimate fee for
         payment: String,
     },
+    /// Get the wallet's lightning address
+    LightningAddress,
+    /// Register a lightning address for this wallet
+    RegisterLightningAddress {
+        /// Username for the lightning address (e.g. "alice" for alice@breez.tips)
+        name: String,
+    },
 }
 
 #[tokio::main]
@@ -93,6 +100,10 @@ async fn main() {
         Command::Channels => cmd_channels(&wallet),
         Command::Info => cmd_info(&wallet),
         Command::EstimateFee { payment } => cmd_estimate_fee(&wallet, &payment).await,
+        Command::LightningAddress => cmd_lightning_address(&wallet).await,
+        Command::RegisterLightningAddress { name } => {
+            cmd_register_lightning_address(&wallet, &name).await
+        }
     };
 
     match result {
@@ -271,5 +282,35 @@ async fn cmd_estimate_fee(wallet: &Wallet, payment: &str) -> Result<serde_json::
     let fee = wallet.estimate_fee(&instructions).await;
     Ok(json!({
         "estimated_fee_sats": fee.sats_rounding_up(),
+    }))
+}
+
+async fn cmd_lightning_address(wallet: &Wallet) -> Result<serde_json::Value, String> {
+    let address = wallet
+        .get_lightning_address()
+        .await
+        .map_err(|e| format!("Failed to get lightning address: {e:?}"))?;
+    Ok(json!({
+        "lightning_address": address,
+    }))
+}
+
+async fn cmd_register_lightning_address(
+    wallet: &Wallet,
+    name: &str,
+) -> Result<serde_json::Value, String> {
+    wallet
+        .register_lightning_address(name.to_string())
+        .await
+        .map_err(|e| format!("Failed to register lightning address: {e:?}"))?;
+
+    let address = wallet
+        .get_lightning_address()
+        .await
+        .map_err(|e| format!("Failed to get lightning address: {e:?}"))?;
+
+    Ok(json!({
+        "registered": true,
+        "lightning_address": address,
     }))
 }

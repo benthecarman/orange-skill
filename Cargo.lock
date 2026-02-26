@@ -1504,7 +1504,7 @@ dependencies = [
 [[package]]
 name = "graduated-rebalancer"
 version = "0.1.0"
-source = "git+https://github.com/lightningdevkit/orange-sdk?rev=d74dfef9cc9df351283410ec1beaf333e343563c#d74dfef9cc9df351283410ec1beaf333e343563c"
+source = "git+https://github.com/lightningdevkit/orange-sdk?rev=8e10b63147c1deb3f27343f23466202fa19ed213#8e10b63147c1deb3f27343f23466202fa19ed213"
 dependencies = [
  "bitcoin-payment-instructions",
  "lightning 0.2.2",
@@ -2860,7 +2860,7 @@ checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 [[package]]
 name = "orange-sdk"
 version = "0.1.0"
-source = "git+https://github.com/lightningdevkit/orange-sdk?rev=d74dfef9cc9df351283410ec1beaf333e343563c#d74dfef9cc9df351283410ec1beaf333e343563c"
+source = "git+https://github.com/lightningdevkit/orange-sdk?rev=8e10b63147c1deb3f27343f23466202fa19ed213#8e10b63147c1deb3f27343f23466202fa19ed213"
 dependencies = [
  "async-trait",
  "bitcoin-payment-instructions",

@@ -8,7 +8,7 @@ name = "orange"
 path = "src/main.rs"
 
 [dependencies]
-orange-sdk = { git = "https://github.com/lightningdevkit/orange-sdk", rev = "d74dfef9cc9df351283410ec1beaf333e343563c" }
+orange-sdk = { git = "https://github.com/lightningdevkit/orange-sdk", rev = "8e10b63147c1deb3f27343f23466202fa19ed213" }
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }

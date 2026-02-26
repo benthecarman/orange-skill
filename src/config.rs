@@ -42,6 +42,7 @@ pub struct SparkConfig {
     pub sync_interval_secs: u32,
     #[serde(default)]
     pub prefer_spark_over_lightning: bool,
+    pub lnurl_domain: Option<String>,
 }
 
 impl Default for SparkConfig {
@@ -49,6 +50,7 @@ impl Default for SparkConfig {
         SparkConfig {
             sync_interval_secs: default_sync_interval(),
             prefer_spark_over_lightning: false,
+            lnurl_domain: Some("breez.tips".to_string()),
         }
     }
 }
@@ -148,6 +150,7 @@ impl Config {
             extra_config: ExtraConfig::Spark(SparkWalletConfig {
                 sync_interval_secs: self.spark.sync_interval_secs,
                 prefer_spark_over_lightning: self.spark.prefer_spark_over_lightning,
+                lnurl_domain: self.spark.lnurl_domain,
             }),
         })
     }

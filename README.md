@@ -29,6 +29,8 @@ Commands:
 | `channels` | List lightning channels |
 | `info` | Get wallet/node information |
 | `estimate-fee <payment>` | Estimate fee for a payment |
+| `lightning-address` | Get the wallet's lightning address |
+| `register-lightning-address <name>` | Register a lightning address |
 
 ## Configuration
 

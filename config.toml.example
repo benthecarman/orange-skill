@@ -24,3 +24,4 @@ node_id = "02a88abd44b3cfc9c0eb7cd93f232dc473de4f66bcea0ee518be70c3b804c90201"
 [spark]
 sync_interval_secs = 60
 prefer_spark_over_lightning = false
+# lnurl_domain = "breez.tips"            # domain for lightning addresses
