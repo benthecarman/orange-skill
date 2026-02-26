@@ -1,5 +1,5 @@
 # Bitcoin network: bitcoin, testnet, signet, regtest
-network = "regtest"
+network = "bitcoin"
 
 # Path for wallet data (SQLite database, seed, logs, etc.)
 # A new wallet seed is generated automatically on first run and saved to {storage_path}/seed
@@ -8,14 +8,14 @@ storage_path = "/tmp/orange-wallet"
 # Blockchain data source
 [chain_source]
 type = "esplora"                          # esplora, electrum, or bitcoind_rpc
-url = "https://mutinynet.com/api"
+url = "https://blockstream.info/api"
 # username = "user"                       # optional, for esplora basic auth
 # password = "pass"                       # optional, for esplora basic auth
 
 # Lightning Service Provider
 [lsp]
-address = "185.150.162.100:3551"
-node_id = "02a88abd44b3cfc9c0eb7cd93f232dc473de4f66bcea0ee518be70c3b804c90201"
+address = "69.59.18.144:9735"
+node_id = "021deaa26ce6bb7cc63bd30e83a2bba1c0368269fa3bb9b616a24f40d941ac7d32"
 # token = "optional-auth-token"           # optional LSP auth token
 
 # Spark trusted wallet backend

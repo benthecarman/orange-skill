@@ -32,19 +32,19 @@ Edit `config.toml`. You need:
 
 A wallet seed is generated automatically on first run and saved to `{storage_path}/seed`. Back up this file — it's the only way to recover your wallet.
 
-The defaults in `config.toml.example` work out of the box with [mutinynet](https://mutinynet.com/) (regtest) for testing:
+The defaults in `config.toml.example` are configured for Bitcoin mainnet:
 
 ```toml
-network = "regtest"
+network = "bitcoin"
 storage_path = "/tmp/orange-wallet"
 
 [chain_source]
 type = "esplora"
-url = "https://mutinynet.com/api"
+url = "https://blockstream.info/api"
 
 [lsp]
-address = "185.150.162.100:3551"
-node_id = "02a88abd44b3cfc9c0eb7cd93f232dc473de4f66bcea0ee518be70c3b804c90201"
+address = "69.59.18.144:9735"
+node_id = "021deaa26ce6bb7cc63bd30e83a2bba1c0368269fa3bb9b616a24f40d941ac7d32"
 
 [spark]
 sync_interval_secs = 60
