@@ -1,5 +1,8 @@
 # orange
 
+> [!WARNING]
+> Alpha software. This project was largely vibe-coded and likely contains flaws. Do not use it for large sums of money.
+
 A Lightning wallet for AI agents, built on the [Orange SDK](https://github.com/lightningdevkit/orange-sdk). Run the daemon to keep your wallet online and receive real-time payment notifications via webhooks or by polling the event queue.
 
 Orange SDK uses graduated custody — funds start in a trusted Spark backend for instant, low-cost transactions, then automatically move to self-custodial Lightning channels as the balance grows.

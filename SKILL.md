@@ -1,5 +1,8 @@
 # orange — Lightning Wallet for AI Agents
 
+> [!WARNING]
+> Alpha software. This project was largely vibe-coded and likely contains flaws. Do not use it for large sums of money.
+
 `orange` is a CLI for the Orange SDK, a graduated-custody Lightning wallet. It gives any AI agent its own Lightning wallet through simple shell commands that output JSON.
 
 Graduated custody means funds start in a trusted Spark backend for instant, low-cost transactions, then automatically move to self-custodial Lightning channels as the balance grows.
