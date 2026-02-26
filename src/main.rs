@@ -127,9 +127,13 @@ async fn main() {
     };
 
     match result {
-        Ok(value) => println!("{}", serde_json::to_string_pretty(&value).unwrap()),
+        Ok(value) => {
+            println!("{}", serde_json::to_string_pretty(&value).unwrap());
+            wallet.stop().await;
+        }
         Err(e) => {
             print_error(&e);
+            wallet.stop().await;
             std::process::exit(1);
         }
     }
