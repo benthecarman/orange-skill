@@ -2,8 +2,9 @@ mod config;
 
 use clap::{Parser, Subcommand};
 use config::Config;
+use orange_sdk::bitcoin::hex::DisplayHex;
 use orange_sdk::bitcoin_payment_instructions::amount::Amount;
-use orange_sdk::{PaymentInfo, Wallet};
+use orange_sdk::{Event, PaymentInfo, Wallet};
 use serde_json::json;
 
 #[derive(Parser)]
@@ -60,6 +61,16 @@ enum Command {
         /// Username for the lightning address (e.g. "alice" for alice@breez.tips)
         name: String,
     },
+    /// Run as a long-lived daemon, listening for wallet events
+    Daemon {
+        /// URLs to POST event JSON to (can be specified multiple times)
+        #[arg(long)]
+        webhook: Vec<String>,
+    },
+    /// Get the next pending event from the wallet event queue
+    GetEvent,
+    /// Mark the current event as handled, removing it from the queue
+    EventHandled,
 }
 
 #[tokio::main]
@@ -90,6 +101,12 @@ async fn main() {
         }
     };
 
+    // Daemon runs its own loop and never returns a Result value
+    if let Command::Daemon { webhook } = &cli.command {
+        cmd_daemon(&wallet, webhook).await;
+        return;
+    }
+
     let result = match cli.command {
         Command::Balance => cmd_balance(&wallet).await,
         Command::Receive { amount } => cmd_receive(&wallet, amount).await,
@@ -104,6 +121,9 @@ async fn main() {
         Command::RegisterLightningAddress { name } => {
             cmd_register_lightning_address(&wallet, &name).await
         }
+        Command::GetEvent => cmd_get_event(&wallet),
+        Command::EventHandled => cmd_event_handled(&wallet),
+        Command::Daemon { .. } => unreachable!(),
     };
 
     match result {
@@ -313,4 +333,206 @@ async fn cmd_register_lightning_address(
         "registered": true,
         "lightning_address": address,
     }))
+}
+
+async fn cmd_daemon(wallet: &Wallet, webhooks: &[String]) {
+    let client = reqwest::Client::new();
+    let has_webhooks = !webhooks.is_empty();
+
+    eprintln!("Daemon started");
+    if has_webhooks {
+        for url in webhooks {
+            eprintln!("Webhook: {url}");
+        }
+    } else {
+        eprintln!("No webhooks configured, events will queue until consumed via get-event/event-handled");
+    }
+    eprintln!("Press Ctrl+C to stop");
+
+    loop {
+        tokio::select! {
+            event = wallet.next_event_async() => {
+                let timestamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+
+                let value = serialize_event(&event, timestamp);
+
+                // POST to all webhooks in parallel, fire-and-forget
+                for url in webhooks {
+                    let client = client.clone();
+                    let url = url.clone();
+                    let body = value.clone();
+                    tokio::spawn(async move {
+                        match client.post(&url).json(&body).send().await {
+                            Ok(resp) if !resp.status().is_success() => {
+                                eprintln!("Webhook {url} returned {}", resp.status());
+                            }
+                            Err(e) => {
+                                eprintln!("Webhook {url} failed: {e}");
+                            }
+                            _ => {}
+                        }
+                    });
+                }
+
+                eprintln!("[{timestamp}] {}", value["type"]);
+
+                // Only auto-ack when webhooks are configured
+                if has_webhooks {
+                    let _ = wallet.event_handled();
+                }
+            }
+            _ = tokio::signal::ctrl_c() => {
+                eprintln!("Shutting down...");
+                break;
+            }
+        }
+    }
+
+    wallet.stop().await;
+}
+
+fn cmd_get_event(wallet: &Wallet) -> Result<serde_json::Value, String> {
+    match wallet.next_event() {
+        Some(event) => {
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            Ok(serialize_event(&event, timestamp))
+        }
+        None => Ok(json!({ "event": null })),
+    }
+}
+
+fn cmd_event_handled(wallet: &Wallet) -> Result<serde_json::Value, String> {
+    wallet
+        .event_handled()
+        .map_err(|_| "Failed to mark event as handled".to_string())?;
+    Ok(json!({ "ok": true }))
+}
+
+fn serialize_event(event: &Event, timestamp: u64) -> serde_json::Value {
+    match event {
+        Event::PaymentSuccessful {
+            payment_id,
+            payment_hash,
+            payment_preimage,
+            fee_paid_msat,
+        } => json!({
+            "type": "payment_successful",
+            "timestamp": timestamp,
+            "payment_id": payment_id.to_string(),
+            "payment_hash": format!("{payment_hash:?}"),
+            "payment_preimage": format!("{payment_preimage:?}"),
+            "fee_paid_msat": fee_paid_msat,
+        }),
+        Event::PaymentFailed {
+            payment_id,
+            payment_hash,
+            reason,
+        } => json!({
+            "type": "payment_failed",
+            "timestamp": timestamp,
+            "payment_id": payment_id.to_string(),
+            "payment_hash": payment_hash.map(|h| format!("{h:?}")),
+            "reason": reason.map(|r| format!("{r:?}")),
+        }),
+        Event::PaymentReceived {
+            payment_id,
+            payment_hash,
+            amount_msat,
+            custom_records,
+            lsp_fee_msats,
+        } => json!({
+            "type": "payment_received",
+            "timestamp": timestamp,
+            "payment_id": payment_id.to_string(),
+            "payment_hash": format!("{payment_hash:?}"),
+            "amount_msat": amount_msat,
+            "amount_sats": amount_msat / 1000,
+            "custom_records_count": custom_records.len(),
+            "lsp_fee_msats": lsp_fee_msats,
+        }),
+        Event::OnchainPaymentReceived {
+            payment_id,
+            txid,
+            amount_sat,
+            status,
+        } => json!({
+            "type": "onchain_payment_received",
+            "timestamp": timestamp,
+            "payment_id": payment_id.to_string(),
+            "txid": txid.to_string(),
+            "amount_sat": amount_sat,
+            "status": format!("{status:?}"),
+        }),
+        Event::ChannelOpened {
+            channel_id,
+            user_channel_id,
+            counterparty_node_id,
+            funding_txo,
+        } => json!({
+            "type": "channel_opened",
+            "timestamp": timestamp,
+            "channel_id": channel_id.to_string(),
+            "user_channel_id": format!("{user_channel_id:?}"),
+            "counterparty_node_id": counterparty_node_id.to_string(),
+            "funding_txo": funding_txo.to_string(),
+        }),
+        Event::ChannelClosed {
+            channel_id,
+            user_channel_id,
+            counterparty_node_id,
+            reason,
+        } => json!({
+            "type": "channel_closed",
+            "timestamp": timestamp,
+            "channel_id": channel_id.to_string(),
+            "user_channel_id": format!("{user_channel_id:?}"),
+            "counterparty_node_id": counterparty_node_id.to_string(),
+            "reason": reason.as_ref().map(|r| format!("{r:?}")),
+        }),
+        Event::RebalanceInitiated {
+            trigger_payment_id,
+            trusted_rebalance_payment_id,
+            amount_msat,
+        } => json!({
+            "type": "rebalance_initiated",
+            "timestamp": timestamp,
+            "trigger_payment_id": trigger_payment_id.to_string(),
+            "trusted_rebalance_payment_id": trusted_rebalance_payment_id.to_lower_hex_string(),
+            "amount_msat": amount_msat,
+        }),
+        Event::RebalanceSuccessful {
+            trigger_payment_id,
+            trusted_rebalance_payment_id,
+            ln_rebalance_payment_id,
+            amount_msat,
+            fee_msat,
+        } => json!({
+            "type": "rebalance_successful",
+            "timestamp": timestamp,
+            "trigger_payment_id": trigger_payment_id.to_string(),
+            "trusted_rebalance_payment_id": trusted_rebalance_payment_id.to_lower_hex_string(),
+            "ln_rebalance_payment_id": ln_rebalance_payment_id.to_lower_hex_string(),
+            "amount_msat": amount_msat,
+            "fee_msat": fee_msat,
+        }),
+        Event::SplicePending {
+            channel_id,
+            user_channel_id,
+            counterparty_node_id,
+            new_funding_txo,
+        } => json!({
+            "type": "splice_pending",
+            "timestamp": timestamp,
+            "channel_id": channel_id.to_string(),
+            "user_channel_id": format!("{user_channel_id:?}"),
+            "counterparty_node_id": counterparty_node_id.to_string(),
+            "new_funding_txo": new_funding_txo.to_string(),
+        }),
+    }
 }

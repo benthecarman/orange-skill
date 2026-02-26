@@ -1,4 +1,4 @@
-# orange — Lightning Wallet CLI
+# orange — Lightning Wallet for AI Agents
 
 `orange` is a CLI for the Orange SDK, a graduated-custody Lightning wallet. It gives any AI agent its own Lightning wallet through simple shell commands that output JSON.
 
@@ -35,7 +35,120 @@ orange --config /path/to/config.toml <command>
 
 Default config path is `config.toml` in the current directory.
 
-## Commands
+## Running the Daemon
+
+The daemon is the primary way to run orange. It keeps the wallet online and connected to the Lightning network.
+
+```
+orange daemon [--webhook <url> ...]
+```
+
+### With webhooks (push model)
+
+When webhooks are configured, the daemon POSTs each event as JSON to every webhook URL in parallel and automatically marks events as handled.
+
+```sh
+orange daemon \
+  --webhook https://your-app.example.com/payments \
+  --webhook https://chat.example.com/notify
+```
+
+Your webhook endpoint should:
+
+- Accept `POST` requests with `Content-Type: application/json`
+- Return any 2xx status code to acknowledge receipt
+- Respond quickly — the daemon fires webhooks in parallel and won't block on slow responses, but non-2xx status codes and connection errors are logged to stderr
+
+### Without webhooks (pull model)
+
+When no webhooks are configured, the daemon keeps the wallet online but does not auto-acknowledge events. Events queue up in the SDK's persistent event queue and are consumed via `get-event` and `event-handled` from a separate terminal.
+
+```sh
+# Terminal 1: keep wallet online
+orange daemon
+
+# Terminal 2: pull events
+orange get-event        # returns next pending event or null
+orange event-handled    # ack it, advancing the queue
+```
+
+### Event Types
+
+Every event includes a `type` and `timestamp` field. Example payload:
+
+```json
+{
+  "type": "payment_received",
+  "timestamp": 1700000000,
+  "payment_id": "SC-abcd1234...",
+  "payment_hash": "...",
+  "amount_msat": 50000000,
+  "amount_sats": 50000,
+  "custom_records_count": 0,
+  "lsp_fee_msats": null
+}
+```
+
+| Type | Description | Key Fields |
+|---|---|---|
+| `payment_successful` | Outgoing payment completed | `payment_id`, `payment_hash`, `payment_preimage`, `fee_paid_msat` |
+| `payment_failed` | Outgoing payment failed | `payment_id`, `payment_hash`, `reason` |
+| `payment_received` | Incoming Lightning payment | `payment_id`, `payment_hash`, `amount_msat`, `amount_sats`, `lsp_fee_msats` |
+| `onchain_payment_received` | Incoming on-chain payment | `payment_id`, `txid`, `amount_sat`, `status` |
+| `channel_opened` | Channel is ready | `channel_id`, `counterparty_node_id`, `funding_txo` |
+| `channel_closed` | Channel was closed | `channel_id`, `counterparty_node_id`, `reason` |
+| `rebalance_initiated` | Trusted-to-Lightning rebalance started | `trigger_payment_id`, `amount_msat` |
+| `rebalance_successful` | Rebalance completed | `trigger_payment_id`, `amount_msat`, `fee_msat` |
+| `splice_pending` | Splice initiated, waiting to confirm | `channel_id`, `counterparty_node_id`, `new_funding_txo` |
+
+## Event Commands
+
+### get-event
+
+Get the next pending event from the wallet's event queue. Returns the event without acknowledging it — call `event-handled` after processing.
+
+```
+orange get-event
+```
+
+Returns the event JSON if one is pending:
+
+```json
+{
+  "type": "payment_received",
+  "timestamp": 1700000000,
+  "payment_id": "SC-abcd1234...",
+  ...
+}
+```
+
+Returns `null` if the queue is empty:
+
+```json
+{
+  "event": null
+}
+```
+
+### event-handled
+
+Mark the current event as handled, removing it from the queue and advancing to the next event.
+
+```
+orange event-handled
+```
+
+```json
+{
+  "ok": true
+}
+```
+
+Call this after you have fully processed the event returned by `get-event`. Do not call this if `get-event` returned `null`.
+
+## One-Shot Commands
+
+These commands perform a single action and exit. They initialize their own wallet instance, so they should not be used while the daemon is running against the same wallet.
 
 ### balance
 
@@ -246,36 +359,6 @@ orange register-lightning-address <name>
 ```
 
 Once registered, anyone can pay you using the lightning address. The domain is configured via `lnurl_domain` in the `[spark]` config section.
-
-## Common Workflows
-
-**Check balance then receive:**
-```sh
-orange balance
-orange receive --amount 50000
-# Share the full_uri or invoice with the sender
-```
-
-**Send a payment:**
-```sh
-orange parse "lnbc500u1p..."    # inspect first
-orange estimate-fee "lnbc500u1p..."  # check fee
-orange send "lnbc500u1p..."     # pay
-orange balance                   # verify
-```
-
-**Set up a lightning address:**
-```sh
-orange register-lightning-address "alice"  # register alice@breez.tips
-orange lightning-address                   # verify it's set
-```
-
-**Monitor wallet:**
-```sh
-orange info          # node status and LSP connection
-orange channels      # channel health
-orange transactions  # payment history
-```
 
 ## Error Format
 
