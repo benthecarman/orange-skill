@@ -1,11 +1,9 @@
 # Bitcoin network: bitcoin, testnet, signet, regtest
 network = "regtest"
 
-# Path for wallet data (SQLite database, logs, etc.)
+# Path for wallet data (SQLite database, seed, logs, etc.)
+# A new wallet seed is generated automatically on first run and saved to {storage_path}/seed
 storage_path = "/tmp/orange-wallet"
-
-# BIP39 mnemonic seed phrase (12 or 24 words)
-mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
 
 # Blockchain data source
 [chain_source]

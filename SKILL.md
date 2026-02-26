@@ -7,14 +7,36 @@
 
 Graduated custody means funds start in a trusted Spark backend for instant, low-cost transactions, then automatically move to self-custodial Lightning channels as the balance grows.
 
-## Configuration
+## Setup
 
-Create a `config.toml` (see `config.toml.example`):
+### Install
+
+Requires [Rust](https://rustup.rs/).
+
+```sh
+git clone https://github.com/benthecarman/orange-skill.git
+cd orange-skill
+cargo install --path .
+```
+
+### Configure
+
+```sh
+cp config.toml.example config.toml
+```
+
+Edit `config.toml`. You need:
+- A **storage path** — where wallet data (SQLite DB, seed, logs) will be stored
+- A **chain source** — Esplora, Electrum, or Bitcoin Core RPC
+- An **LSP** — Lightning Service Provider for channel management
+
+A wallet seed is generated automatically on first run and saved to `{storage_path}/seed`. Back up this file — it's the only way to recover your wallet.
+
+The defaults in `config.toml.example` work out of the box with [mutinynet](https://mutinynet.com/) (regtest) for testing:
 
 ```toml
 network = "regtest"
 storage_path = "/tmp/orange-wallet"
-mnemonic = "your twelve word seed phrase here ..."
 
 [chain_source]
 type = "esplora"
@@ -30,13 +52,30 @@ prefer_spark_over_lightning = false
 # lnurl_domain = "breez.tips"
 ```
 
-Pass the config path with `--config`:
+Pass the config path with `--config` (defaults to `config.toml` in the current directory):
 
 ```
 orange --config /path/to/config.toml <command>
 ```
 
-Default config path is `config.toml` in the current directory.
+### Start the daemon and receive your first payment
+
+```sh
+# 1. Start the daemon (with or without webhooks)
+orange daemon --webhook https://your-app.example.com/payments
+
+# 2. In another terminal, generate an invoice
+orange receive --amount 1000
+# Share the returned invoice or full_uri with the sender
+
+# 3. When the payment arrives, your webhook receives a payment_received event
+#    Or poll it manually:
+orange get-event        # see the event
+orange event-handled    # acknowledge it
+
+# 4. Check your balance
+orange balance
+```
 
 ## Running the Daemon
 
@@ -151,7 +190,7 @@ Call this after you have fully processed the event returned by `get-event`. Do n
 
 ## One-Shot Commands
 
-These commands perform a single action and exit. They initialize their own wallet instance, so they should not be used while the daemon is running against the same wallet.
+These commands perform a single action and exit. They can be run while the daemon is active to interact with the wallet (send payments, check balance, generate invoices, etc.).
 
 ### balance
 

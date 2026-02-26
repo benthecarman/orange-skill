@@ -11,7 +11,6 @@ use std::str::FromStr;
 pub struct Config {
     pub network: String,
     pub storage_path: String,
-    pub mnemonic: String,
     pub chain_source: ChainSourceConfig,
     pub lsp: LspConfig,
     #[serde(default)]
@@ -129,13 +128,29 @@ impl Config {
             .parse()
             .map_err(|e| format!("Invalid LSP node_id: {e}"))?;
 
-        let mnemonic = Mnemonic::from_str(&self.mnemonic)
-            .map_err(|e| format!("Invalid mnemonic: {e}"))?;
+        let storage_dir = PathBuf::from(&self.storage_path);
+        std::fs::create_dir_all(&storage_dir)
+            .map_err(|e| format!("Failed to create storage directory: {e}"))?;
 
-        let log_path = PathBuf::from(&self.storage_path).join("wallet.log");
+        let seed_path = storage_dir.join("seed");
+        let mnemonic = if seed_path.exists() {
+            let content = std::fs::read_to_string(&seed_path)
+                .map_err(|e| format!("Failed to read seed file: {e}"))?;
+            Mnemonic::from_str(content.trim())
+                .map_err(|e| format!("Invalid mnemonic in seed file: {e}"))?
+        } else {
+            let m = Mnemonic::generate(12)
+                .map_err(|e| format!("Failed to generate mnemonic: {e}"))?;
+            std::fs::write(&seed_path, m.to_string())
+                .map_err(|e| format!("Failed to write seed file: {e}"))?;
+            eprintln!("Generated new wallet seed at {}", seed_path.display());
+            m
+        };
+
+        let log_path = storage_dir.join("wallet.log");
 
         Ok(WalletConfig {
-            storage_config: StorageConfig::LocalSQLite(self.storage_path),
+            storage_config: StorageConfig::LocalSQLite(storage_dir.to_string_lossy().into_owned()),
             logger_type: LoggerType::File { path: log_path },
             chain_source,
             lsp: (lsp_address, lsp_pubkey, self.lsp.token),

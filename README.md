@@ -7,31 +7,68 @@ A Lightning wallet for AI agents, built on the [Orange SDK](https://github.com/l
 
 Orange SDK uses graduated custody — funds start in a trusted Spark backend for instant, low-cost transactions, then automatically move to self-custodial Lightning channels as the balance grows.
 
-## Install
+## Getting Started
 
-```
+### 1. Install
+
+Requires [Rust](https://rustup.rs/).
+
+```sh
+git clone https://github.com/benthecarman/orange-skill.git
+cd orange-skill
 cargo install --path .
 ```
 
-## Quick Start
-
-1. Copy `config.toml.example` to `config.toml` and fill in your settings
-2. Start the daemon:
+### 2. Configure
 
 ```sh
-# Push model: events are POSTed to your endpoints and auto-acknowledged
+cp config.toml.example config.toml
+```
+
+The defaults in `config.toml.example` work out of the box with [mutinynet](https://mutinynet.com/) (regtest) for testing. A wallet seed is generated automatically on first run and saved to `{storage_path}/seed`.
+
+```toml
+network = "regtest"
+storage_path = "/tmp/orange-wallet"
+
+[chain_source]
+type = "esplora"
+url = "https://mutinynet.com/api"
+
+[lsp]
+address = "185.150.162.100:3551"
+node_id = "02a88abd44b3cfc9c0eb7cd93f232dc473de4f66bcea0ee518be70c3b804c90201"
+```
+
+### 3. Start the daemon
+
+```sh
+# With webhooks — events are POSTed to your endpoints automatically
 orange daemon \
   --webhook https://your-app.example.com/payments \
   --webhook https://chat.example.com/notify
 
-# Pull model: events queue up for manual consumption
+# Or without webhooks — poll events manually with get-event/event-handled
 orange daemon
 ```
 
-3. Use one-shot commands to interact with the wallet:
+### 4. Receive a payment
+
+In a separate terminal:
 
 ```sh
+# Generate an invoice
 orange receive --amount 50000
+
+# Or set up a reusable lightning address
+orange register-lightning-address "alice"
+```
+
+Share the invoice or lightning address with the sender. When the payment arrives, your webhook will receive a `payment_received` event, or you can poll it with `orange get-event`.
+
+### 5. Send a payment
+
+```sh
 orange send "lnbc500u1p..."
 orange balance
 ```
@@ -43,22 +80,6 @@ The daemon POSTs a JSON body to each `--webhook` URL whenever a wallet event occ
 Multiple `--webhook` flags fan out events to different services in parallel (e.g. one for your webstore, one for chat notifications).
 
 When no webhooks are configured, events accumulate in the SDK's persistent queue. Poll them with `get-event` and acknowledge with `event-handled`.
-
-## Configuration
-
-```toml
-network = "regtest"
-storage_path = "/tmp/orange-wallet"
-mnemonic = "your twelve word seed phrase ..."
-
-[chain_source]
-type = "esplora"
-url = "https://mutinynet.com/api"
-
-[lsp]
-address = "185.150.162.100:3551"
-node_id = "02a88abd44b3cfc9c0eb7cd93f232dc473de4f66bcea0ee518be70c3b804c90201"
-```
 
 See [SKILL.md](SKILL.md) for full command documentation with example JSON output.
 
