@@ -1,14 +1,19 @@
 # Agent Payment Flows
 
-This guide covers how to build payment-accepting applications (like a webstore) on top of `orange`.
+This guide covers how to build payment-accepting applications (like a webstore) on top of `orange`. The webstore runs on its own server and does not need access to the `orange` CLI — it fetches invoices from the wallet's lightning address over HTTP and receives payment confirmations via webhook.
 
 ## Webstore Flow
 
-The basic pattern: generate a unique invoice per order, store the payment hash, and match it when the webhook fires.
-
 ### Setup
 
-1. Start the daemon with a webhook pointing at your webstore backend:
+1. Register a lightning address for your wallet:
+
+```sh
+orange register-lightning-address "mystore"
+# => mystore@breez.tips
+```
+
+2. Start the daemon with a webhook pointing at your webstore backend:
 
 ```sh
 orange daemon \
@@ -17,41 +22,59 @@ orange daemon \
 
 The `|token` suffix adds an `Authorization: Bearer your-secret-token` header to every POST so your backend can verify requests are authentic.
 
-2. Optionally register a lightning address for your store:
-
-```sh
-orange register-lightning-address "mystore"
-# => mystore@breez.tips
-```
-
 ### Creating an Order
 
-When a customer checks out, generate an invoice for the order amount:
+When a customer checks out, the webstore fetches an invoice from the lightning address using the LNURL-pay protocol. This is a standard HTTP flow — no CLI access required.
 
-```sh
-orange receive --amount 5000
+**Step 1: Resolve the lightning address**
+
+Parse the lightning address `mystore@breez.tips` into an LNURL-pay endpoint:
+
 ```
+GET https://breez.tips/.well-known/lnurlp/mystore
+```
+
+Response:
 
 ```json
 {
-  "invoice": "lnbc50u1p...",
-  "address": "bc1q...",
-  "amount_sats": 5000,
-  "full_uri": "bitcoin:bc1q...?lightning=lnbc50u1p...",
-  "from_trusted": false
+  "tag": "payRequest",
+  "callback": "https://breez.tips/lnurlp/mystore/callback",
+  "minSendable": 1000,
+  "maxSendable": 100000000000
 }
 ```
 
-Store the mapping in your database:
+**Step 2: Request an invoice for the order amount**
+
+Call the callback with the amount in millisatoshis:
+
+```
+GET https://breez.tips/lnurlp/mystore/callback?amount=5000000
+```
+
+Response:
+
+```json
+{
+  "pr": "lnbc50u1p...",
+  "routes": []
+}
+```
+
+**Step 3: Extract the payment hash and store the order**
+
+The `pr` field is a BOLT11 invoice. Decode it to extract the payment hash (any BOLT11 library can do this), then store the mapping:
 
 ```
 order_id: "order-123"
+payment_hash: "e3b0c44298fc1c14..."
 invoice: "lnbc50u1p..."
 amount_sats: 5000
 status: "pending"
 ```
 
-Display the `invoice` or `full_uri` to the customer as a QR code or payment link.
+Display the invoice to the customer as a QR code or payment link.
 
 ### Handling Payment Confirmation
 
@@ -72,15 +95,23 @@ When the customer pays, the daemon POSTs to your webhook:
 
 Your webhook handler should:
 
-1. Look up the order by `payment_id` or `payment_hash`
-2. Verify `amount_sats` matches the expected amount
-3. Mark the order as paid
-4. Fulfill the order (send product, unlock content, etc.)
+1. Verify the `Authorization` header matches your secret token
+2. Look up the order by `payment_hash`
+3. Verify `amount_sats` matches the expected amount
+4. Mark the order as paid
+5. Fulfill the order (send product, unlock content, etc.)
 
 ### Example Webhook Handler (pseudocode)
 
 ```python
+WEBHOOK_SECRET = "your-secret-token"
+
 def handle_webhook(request):
+    # Verify auth
+    auth = request.headers.get("Authorization", "")
+    if auth != f"Bearer {WEBHOOK_SECRET}":
+        return 401
+
     event = request.json
 
     if event["type"] != "payment_received":
@@ -106,23 +137,31 @@ def handle_webhook(request):
     return 200
 ```
 
-### Matching Payments to Orders
+### Summary
 
-There are two ways to correlate incoming payments with orders:
-
-**By payment_hash** — When you call `orange receive`, the returned invoice encodes a payment hash. Parse the BOLT11 invoice to extract it and store it alongside the order. When the webhook fires, match on `event["payment_hash"]`.
-
-**By payment_id** — The `payment_id` in the event is the SDK's internal identifier. You can also store this if you extract it from transaction history after generating the invoice.
-
-### Checking Payment Status
-
-If you need to verify a payment outside the webhook flow (e.g. customer claims they paid):
-
-```sh
-orange transactions
 ```
-
-Search the returned transactions list for a matching payment.
+┌──────────────┐    LNURL-pay     ┌──────────────┐
+│              │ ───────────────►  │              │
+│   Webstore   │   (get invoice)  │  breez.tips   │
+│              │ ◄───────────────  │              │
+└──────┬───────┘    (invoice)     └──────────────┘
+       │
+       │ show invoice
+       ▼
+┌──────────────┐    Lightning     ┌──────────────┐
+│              │ ───────────────► │              │
+│   Customer   │    (payment)     │ orange daemon │
+│              │                  │              │
+└──────────────┘                  └──────┬───────┘
+                                         │
+                                         │ webhook POST
+                                         ▼
+                                  ┌──────────────┐
+                                  │              │
+                                  │   Webstore   │
+                                  │  (fulfills)  │
+                                  └──────────────┘
+```
 
 ## Pull Model (No Webhook)
 
@@ -142,4 +181,4 @@ while true:
     shell("orange event-handled")
 ```
 
-This is simpler to set up but adds latency equal to your poll interval.
+This is simpler to set up but adds latency equal to your poll interval. It also requires the polling application to have CLI access to `orange`.
