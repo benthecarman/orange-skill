@@ -346,7 +346,7 @@ async fn cmd_daemon(wallet: &Wallet, webhooks: &[String]) {
     let hooks: Vec<(String, Option<String>)> = webhooks
         .iter()
         .map(|w| match w.split_once('|') {
-            Some((url, token)) => (url.to_string(), Some(token.to_string())),
+            Some((url, token)) => (url.to_string(), Some(token.trim().to_string())),
             None => (w.clone(), None),
         })
         .collect();
@@ -376,25 +376,45 @@ async fn cmd_daemon(wallet: &Wallet, webhooks: &[String]) {
 
                 let value = serialize_event(&event, timestamp);
 
-                // POST to all webhooks in parallel, fire-and-forget
+                // POST to all webhooks in parallel with retries
                 for (url, token) in &hooks {
                     let client = client.clone();
                     let url = url.clone();
                     let body = value.clone();
                     let token = token.clone();
                     tokio::spawn(async move {
-                        let mut req = client.post(&url).json(&body);
-                        if let Some(ref t) = token {
-                            req = req.bearer_auth(t);
-                        }
-                        match req.send().await {
-                            Ok(resp) if !resp.status().is_success() => {
-                                eprintln!("Webhook {url} returned {}", resp.status());
+                        let max_retries = 3u32;
+                        for attempt in 0..=max_retries {
+                            let mut req = client.post(&url).json(&body);
+                            if let Some(ref t) = token {
+                                req = req.bearer_auth(t);
                             }
-                            Err(e) => {
-                                eprintln!("Webhook {url} failed: {e}");
+                            match req.send().await {
+                                Ok(resp) if resp.status().is_success() => break,
+                                Ok(resp) if resp.status().is_server_error() => {
+                                    if attempt < max_retries {
+                                        let delay = 1u64 << attempt;
+                                        eprintln!("Webhook {url} returned {}, retrying in {delay}s...", resp.status());
+                                        tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                                    } else {
+                                        eprintln!("Webhook {url} returned {} after {max_retries} retries, giving up", resp.status());
+                                    }
+                                }
+                                Ok(resp) => {
+                                    // 4xx client errors — don't retry
+                                    eprintln!("Webhook {url} returned {}", resp.status());
+                                    break;
+                                }
+                                Err(e) => {
+                                    if attempt < max_retries {
+                                        let delay = 1u64 << attempt;
+                                        eprintln!("Webhook {url} failed: {e}, retrying in {delay}s...");
+                                        tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                                    } else {
+                                        eprintln!("Webhook {url} failed after {max_retries} retries: {e}");
+                                    }
+                                }
                             }
-                            _ => {}
                         }
                     });
                 }

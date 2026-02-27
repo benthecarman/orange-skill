@@ -122,6 +122,7 @@ Your webhook endpoint should:
 - Verify the `Authorization: Bearer <token>` header if a token is configured
 - Return any 2xx status code to acknowledge receipt
 - Respond quickly — the daemon fires webhooks in parallel and won't block on slow responses, but non-2xx status codes and connection errors are logged to stderr
+- Transient failures (connection errors and 5xx responses) are retried up to 3 times with exponential backoff (1s, 2s, 4s). Client errors (4xx) are not retried. If all retries are exhausted, the event is still marked as handled and will not be re-delivered
 
 For a complete example of building a webstore that accepts Lightning payments using webhooks and LNURL-pay, see [docs/agent-payment-flows.md](docs/agent-payment-flows.md).
 
