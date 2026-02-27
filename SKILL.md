@@ -104,6 +104,8 @@ Your webhook endpoint should:
 - Return any 2xx status code to acknowledge receipt
 - Respond quickly — the daemon fires webhooks in parallel and won't block on slow responses, but non-2xx status codes and connection errors are logged to stderr
 
+For a complete example of building a webstore that accepts Lightning payments using webhooks and LNURL-pay, see [docs/agent-payment-flows.md](docs/agent-payment-flows.md).
+
 ### Without webhooks (pull model)
 
 When no webhooks are configured, the daemon keeps the wallet online but does not auto-acknowledge events. Events queue up in the SDK's persistent event queue and are consumed via `get-event` and `event-handled` from a separate terminal.
