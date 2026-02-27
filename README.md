@@ -11,7 +11,15 @@ Orange SDK uses graduated custody — funds start in a trusted Spark backend for
 
 ### 1. Install
 
-Requires [Rust](https://rustup.rs/).
+Requires [Rust](https://rustup.rs/) and `protoc` (Protocol Buffers compiler):
+
+```sh
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Install protoc (Ubuntu/Debian — see SKILL.md for other platforms)
+sudo apt install -y protobuf-compiler
+```
 
 ```sh
 git clone https://github.com/benthecarman/orange-skill.git

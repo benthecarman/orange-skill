@@ -9,9 +9,28 @@ Graduated custody means funds start in a trusted Spark backend for instant, low-
 
 ## Setup
 
-### Install
+### Prerequisites
 
-Requires [Rust](https://rustup.rs/).
+**Rust** — Install via [rustup](https://rustup.rs/):
+
+```sh
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+**protoc** (Protocol Buffers compiler) — Required by the Spark SDK dependency:
+
+```sh
+# Ubuntu/Debian
+sudo apt install -y protobuf-compiler
+
+# macOS
+brew install protobuf
+
+# Arch
+sudo pacman -S protobuf
+```
+
+### Install
 
 ```sh
 git clone https://github.com/benthecarman/orange-skill.git
