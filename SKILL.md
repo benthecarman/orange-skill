@@ -36,7 +36,7 @@ The defaults in `config.toml.example` are configured for Bitcoin mainnet:
 
 ```toml
 network = "bitcoin"
-storage_path = "/tmp/orange-wallet"
+storage_path = "~/.orange"
 
 [chain_source]
 type = "esplora"

@@ -3,7 +3,7 @@ network = "bitcoin"
 
 # Path for wallet data (SQLite database, seed, logs, etc.)
 # A new wallet seed is generated automatically on first run and saved to {storage_path}/seed
-storage_path = "/tmp/orange-wallet"
+storage_path = "~/.orange"
 
 # Blockchain data source
 [chain_source]

@@ -128,7 +128,13 @@ impl Config {
             .parse()
             .map_err(|e| format!("Invalid LSP node_id: {e}"))?;
 
-        let storage_dir = PathBuf::from(&self.storage_path);
+        let storage_dir = if self.storage_path.starts_with("~/") {
+            let home = std::env::var("HOME")
+                .map_err(|_| "storage_path uses ~ but HOME is not set".to_string())?;
+            PathBuf::from(home).join(&self.storage_path[2..])
+        } else {
+            PathBuf::from(&self.storage_path)
+        };
         std::fs::create_dir_all(&storage_dir)
             .map_err(|e| format!("Failed to create storage directory: {e}"))?;
 
