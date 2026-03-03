@@ -15,6 +15,8 @@ pub struct Config {
     pub lsp: LspConfig,
     #[serde(default)]
     pub spark: SparkConfig,
+    #[serde(default)]
+    pub daemon: DaemonConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -56,6 +58,31 @@ impl Default for SparkConfig {
 
 fn default_sync_interval() -> u32 {
     60
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DaemonConfig {
+    #[serde(default = "default_daemon_host")]
+    pub host: String,
+    #[serde(default = "default_daemon_port")]
+    pub port: u16,
+}
+
+impl Default for DaemonConfig {
+    fn default() -> Self {
+        DaemonConfig {
+            host: default_daemon_host(),
+            port: default_daemon_port(),
+        }
+    }
+}
+
+fn default_daemon_host() -> String {
+    "127.0.0.1".to_string()
+}
+
+fn default_daemon_port() -> u16 {
+    2884
 }
 
 impl Config {
