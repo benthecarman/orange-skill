@@ -1,11 +1,15 @@
 mod config;
 
+use axum::extract::State;
+use axum::routing::{get, post};
+use axum::{Json, Router};
 use clap::{Parser, Subcommand};
 use config::Config;
 use orange_sdk::bitcoin::hex::DisplayHex;
 use orange_sdk::bitcoin_payment_instructions::amount::Amount;
 use orange_sdk::{Event, PaymentInfo, Wallet};
 use serde_json::json;
+use std::sync::Arc;
 
 #[derive(Parser)]
 #[command(name = "orange", about = "Orange SDK Lightning wallet CLI")]
@@ -73,6 +77,31 @@ enum Command {
     EventHandled,
 }
 
+// --- Request types for daemon HTTP API ---
+
+#[derive(serde::Deserialize)]
+struct ReceiveRequest {
+    amount: Option<u64>,
+}
+
+#[derive(serde::Deserialize)]
+struct SendRequest {
+    payment: String,
+    amount: Option<u64>,
+}
+
+#[derive(serde::Deserialize)]
+struct PaymentRequest {
+    payment: String,
+}
+
+#[derive(serde::Deserialize)]
+struct RegisterAddressRequest {
+    name: String,
+}
+
+// --- Main ---
+
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -85,56 +114,44 @@ async fn main() {
         }
     };
 
-    let wallet_config = match config.into_wallet_config() {
-        Ok(c) => c,
-        Err(e) => {
-            print_error(&e);
-            std::process::exit(1);
-        }
-    };
+    let daemon_host = config.daemon.host.clone();
+    let daemon_port = config.daemon.port;
 
-    let wallet = match Wallet::new(wallet_config).await {
-        Ok(w) => w,
-        Err(e) => {
-            print_error(&format!("Failed to initialize wallet: {e:?}"));
-            std::process::exit(1);
-        }
-    };
+    if let Command::Daemon { webhook } = cli.command {
+        // Server mode: initialize wallet, start HTTP server + event loop
+        let wallet_config = match config.into_wallet_config() {
+            Ok(c) => c,
+            Err(e) => {
+                print_error(&e);
+                std::process::exit(1);
+            }
+        };
 
-    // Daemon runs its own loop and never returns a Result value
-    if let Command::Daemon { webhook } = &cli.command {
-        cmd_daemon(&wallet, webhook).await;
-        return;
-    }
+        let wallet = match Wallet::new(wallet_config).await {
+            Ok(w) => w,
+            Err(e) => {
+                print_error(&format!("Failed to initialize wallet: {e:?}"));
+                std::process::exit(1);
+            }
+        };
 
-    let result = match cli.command {
-        Command::Balance => cmd_balance(&wallet).await,
-        Command::Receive { amount } => cmd_receive(&wallet, amount).await,
-        Command::ReceiveOffer => cmd_receive_offer(&wallet).await,
-        Command::Send { payment, amount } => cmd_send(&wallet, &payment, amount).await,
-        Command::Parse { payment } => cmd_parse(&wallet, &payment).await,
-        Command::Transactions => cmd_transactions(&wallet).await,
-        Command::Channels => cmd_channels(&wallet),
-        Command::Info => cmd_info(&wallet),
-        Command::EstimateFee { payment } => cmd_estimate_fee(&wallet, &payment).await,
-        Command::LightningAddress => cmd_lightning_address(&wallet).await,
-        Command::RegisterLightningAddress { name } => {
-            cmd_register_lightning_address(&wallet, &name).await
-        }
-        Command::GetEvent => cmd_get_event(&wallet),
-        Command::EventHandled => cmd_event_handled(&wallet),
-        Command::Daemon { .. } => unreachable!(),
-    };
-
-    match result {
-        Ok(value) => {
-            println!("{}", serde_json::to_string_pretty(&value).unwrap());
-            wallet.stop().await;
-        }
-        Err(e) => {
-            print_error(&e);
-            wallet.stop().await;
-            std::process::exit(1);
+        let wallet = Arc::new(wallet);
+        run_daemon(wallet, &daemon_host, daemon_port, &webhook).await;
+    } else {
+        // Client mode: call daemon via HTTP
+        let base_url = format!("http://{daemon_host}:{daemon_port}");
+        let result = rpc_call(&base_url, cli.command).await;
+        match result {
+            Ok(value) => {
+                println!("{}", serde_json::to_string_pretty(&value).unwrap());
+                if value.get("error").is_some() {
+                    std::process::exit(1);
+                }
+            }
+            Err(e) => {
+                print_error(&e);
+                std::process::exit(1);
+            }
         }
     }
 }
@@ -145,6 +162,318 @@ fn print_error(msg: &str) {
         serde_json::to_string_pretty(&json!({"error": msg})).unwrap()
     );
 }
+
+// --- RPC Client (non-daemon commands call the daemon over HTTP) ---
+
+async fn rpc_call(base_url: &str, command: Command) -> Result<serde_json::Value, String> {
+    let client = reqwest::Client::new();
+
+    let response = match command {
+        Command::Balance => client.get(format!("{base_url}/balance")).send().await,
+        Command::Receive { amount } => {
+            client
+                .post(format!("{base_url}/receive"))
+                .json(&json!({ "amount": amount }))
+                .send()
+                .await
+        }
+        Command::ReceiveOffer => client.get(format!("{base_url}/receive-offer")).send().await,
+        Command::Send { payment, amount } => {
+            client
+                .post(format!("{base_url}/send"))
+                .json(&json!({ "payment": payment, "amount": amount }))
+                .send()
+                .await
+        }
+        Command::Parse { payment } => {
+            client
+                .post(format!("{base_url}/parse"))
+                .json(&json!({ "payment": payment }))
+                .send()
+                .await
+        }
+        Command::Transactions => client.get(format!("{base_url}/transactions")).send().await,
+        Command::Channels => client.get(format!("{base_url}/channels")).send().await,
+        Command::Info => client.get(format!("{base_url}/info")).send().await,
+        Command::EstimateFee { payment } => {
+            client
+                .post(format!("{base_url}/estimate-fee"))
+                .json(&json!({ "payment": payment }))
+                .send()
+                .await
+        }
+        Command::LightningAddress => {
+            client
+                .get(format!("{base_url}/lightning-address"))
+                .send()
+                .await
+        }
+        Command::RegisterLightningAddress { name } => {
+            client
+                .post(format!("{base_url}/register-lightning-address"))
+                .json(&json!({ "name": name }))
+                .send()
+                .await
+        }
+        Command::GetEvent => client.get(format!("{base_url}/get-event")).send().await,
+        Command::EventHandled => client.post(format!("{base_url}/event-handled")).send().await,
+        Command::Daemon { .. } => unreachable!(),
+    }
+    .map_err(|e| format!("Failed to connect to daemon at {base_url}: {e}"))?;
+
+    response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|e| format!("Failed to parse daemon response: {e}"))
+}
+
+// --- Daemon (HTTP Server + Event Loop) ---
+
+async fn run_daemon(wallet: Arc<Wallet>, host: &str, port: u16, webhooks: &[String]) {
+    let app = Router::new()
+        .route("/balance", get(handle_balance))
+        .route("/receive", post(handle_receive))
+        .route("/receive-offer", get(handle_receive_offer))
+        .route("/send", post(handle_send))
+        .route("/parse", post(handle_parse))
+        .route("/transactions", get(handle_transactions))
+        .route("/channels", get(handle_channels))
+        .route("/info", get(handle_info))
+        .route("/estimate-fee", post(handle_estimate_fee))
+        .route("/lightning-address", get(handle_lightning_address))
+        .route(
+            "/register-lightning-address",
+            post(handle_register_lightning_address),
+        )
+        .route("/get-event", get(handle_get_event))
+        .route("/event-handled", post(handle_event_handled))
+        .with_state(wallet.clone());
+
+    let addr = format!("{host}:{port}");
+    let listener = tokio::net::TcpListener::bind(&addr)
+        .await
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to bind to {addr}: {e}");
+            std::process::exit(1);
+        });
+
+    eprintln!("Daemon listening on {addr}");
+
+    // Spawn HTTP server in background
+    tokio::spawn(async move {
+        if let Err(e) = axum::serve(listener, app).await {
+            eprintln!("HTTP server error: {e}");
+        }
+    });
+
+    // Run event loop with webhooks
+    run_event_loop(&wallet, webhooks).await;
+
+    wallet.stop().await;
+}
+
+async fn run_event_loop(wallet: &Wallet, webhooks: &[String]) {
+    let client = reqwest::Client::new();
+
+    let hooks: Vec<(String, Option<String>)> = webhooks
+        .iter()
+        .map(|w| match w.split_once('|') {
+            Some((url, token)) => (url.to_string(), Some(token.trim().to_string())),
+            None => (w.clone(), None),
+        })
+        .collect();
+    let has_webhooks = !hooks.is_empty();
+
+    if has_webhooks {
+        for (url, token) in &hooks {
+            if token.is_some() {
+                eprintln!("Webhook: {url} (auth: Bearer token)");
+            } else {
+                eprintln!("Webhook: {url}");
+            }
+        }
+    } else {
+        eprintln!("No webhooks configured, events will queue until consumed via get-event/event-handled or the HTTP API");
+    }
+    eprintln!("Press Ctrl+C to stop");
+
+    loop {
+        tokio::select! {
+            event = wallet.next_event_async() => {
+                let timestamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+
+                let value = serialize_event(&event, timestamp);
+
+                for (url, token) in &hooks {
+                    let client = client.clone();
+                    let url = url.clone();
+                    let body = value.clone();
+                    let token = token.clone();
+                    tokio::spawn(async move {
+                        let max_retries = 3u32;
+                        for attempt in 0..=max_retries {
+                            let mut req = client.post(&url).json(&body);
+                            if let Some(ref t) = token {
+                                req = req.bearer_auth(t);
+                            }
+                            match req.send().await {
+                                Ok(resp) if resp.status().is_success() => break,
+                                Ok(resp) if resp.status().is_server_error() => {
+                                    if attempt < max_retries {
+                                        let delay = 1u64 << attempt;
+                                        eprintln!("Webhook {url} returned {}, retrying in {delay}s...", resp.status());
+                                        tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                                    } else {
+                                        eprintln!("Webhook {url} returned {} after {max_retries} retries, giving up", resp.status());
+                                    }
+                                }
+                                Ok(resp) => {
+                                    // 4xx client errors — don't retry
+                                    eprintln!("Webhook {url} returned {}", resp.status());
+                                    break;
+                                }
+                                Err(e) => {
+                                    if attempt < max_retries {
+                                        let delay = 1u64 << attempt;
+                                        eprintln!("Webhook {url} failed: {e}, retrying in {delay}s...");
+                                        tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                                    } else {
+                                        eprintln!("Webhook {url} failed after {max_retries} retries: {e}");
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+
+                eprintln!("[{timestamp}] {}", value["type"]);
+
+                if has_webhooks {
+                    let _ = wallet.event_handled();
+                }
+            }
+            _ = tokio::signal::ctrl_c() => {
+                eprintln!("Shutting down...");
+                break;
+            }
+        }
+    }
+}
+
+// --- HTTP Handlers ---
+
+async fn handle_balance(State(wallet): State<Arc<Wallet>>) -> Json<serde_json::Value> {
+    Json(match cmd_balance(&wallet).await {
+        Ok(v) => v,
+        Err(e) => json!({"error": e}),
+    })
+}
+
+async fn handle_receive(
+    State(wallet): State<Arc<Wallet>>,
+    Json(body): Json<ReceiveRequest>,
+) -> Json<serde_json::Value> {
+    Json(match cmd_receive(&wallet, body.amount).await {
+        Ok(v) => v,
+        Err(e) => json!({"error": e}),
+    })
+}
+
+async fn handle_receive_offer(State(wallet): State<Arc<Wallet>>) -> Json<serde_json::Value> {
+    Json(match cmd_receive_offer(&wallet).await {
+        Ok(v) => v,
+        Err(e) => json!({"error": e}),
+    })
+}
+
+async fn handle_send(
+    State(wallet): State<Arc<Wallet>>,
+    Json(body): Json<SendRequest>,
+) -> Json<serde_json::Value> {
+    Json(match cmd_send(&wallet, &body.payment, body.amount).await {
+        Ok(v) => v,
+        Err(e) => json!({"error": e}),
+    })
+}
+
+async fn handle_parse(
+    State(wallet): State<Arc<Wallet>>,
+    Json(body): Json<PaymentRequest>,
+) -> Json<serde_json::Value> {
+    Json(match cmd_parse(&wallet, &body.payment).await {
+        Ok(v) => v,
+        Err(e) => json!({"error": e}),
+    })
+}
+
+async fn handle_transactions(State(wallet): State<Arc<Wallet>>) -> Json<serde_json::Value> {
+    Json(match cmd_transactions(&wallet).await {
+        Ok(v) => v,
+        Err(e) => json!({"error": e}),
+    })
+}
+
+async fn handle_channels(State(wallet): State<Arc<Wallet>>) -> Json<serde_json::Value> {
+    Json(match cmd_channels(&wallet) {
+        Ok(v) => v,
+        Err(e) => json!({"error": e}),
+    })
+}
+
+async fn handle_info(State(wallet): State<Arc<Wallet>>) -> Json<serde_json::Value> {
+    Json(match cmd_info(&wallet) {
+        Ok(v) => v,
+        Err(e) => json!({"error": e}),
+    })
+}
+
+async fn handle_estimate_fee(
+    State(wallet): State<Arc<Wallet>>,
+    Json(body): Json<PaymentRequest>,
+) -> Json<serde_json::Value> {
+    Json(match cmd_estimate_fee(&wallet, &body.payment).await {
+        Ok(v) => v,
+        Err(e) => json!({"error": e}),
+    })
+}
+
+async fn handle_lightning_address(State(wallet): State<Arc<Wallet>>) -> Json<serde_json::Value> {
+    Json(match cmd_lightning_address(&wallet).await {
+        Ok(v) => v,
+        Err(e) => json!({"error": e}),
+    })
+}
+
+async fn handle_register_lightning_address(
+    State(wallet): State<Arc<Wallet>>,
+    Json(body): Json<RegisterAddressRequest>,
+) -> Json<serde_json::Value> {
+    Json(
+        match cmd_register_lightning_address(&wallet, &body.name).await {
+            Ok(v) => v,
+            Err(e) => json!({"error": e}),
+        },
+    )
+}
+
+async fn handle_get_event(State(wallet): State<Arc<Wallet>>) -> Json<serde_json::Value> {
+    Json(match cmd_get_event(&wallet) {
+        Ok(v) => v,
+        Err(e) => json!({"error": e}),
+    })
+}
+
+async fn handle_event_handled(State(wallet): State<Arc<Wallet>>) -> Json<serde_json::Value> {
+    Json(match cmd_event_handled(&wallet) {
+        Ok(v) => v,
+        Err(e) => json!({"error": e}),
+    })
+}
+
+// --- Wallet Command Implementations ---
 
 async fn cmd_balance(wallet: &Wallet) -> Result<serde_json::Value, String> {
     let balance = wallet
@@ -337,103 +666,6 @@ async fn cmd_register_lightning_address(
         "registered": true,
         "lightning_address": address,
     }))
-}
-
-async fn cmd_daemon(wallet: &Wallet, webhooks: &[String]) {
-    let client = reqwest::Client::new();
-
-    // Parse "url|token" format
-    let hooks: Vec<(String, Option<String>)> = webhooks
-        .iter()
-        .map(|w| match w.split_once('|') {
-            Some((url, token)) => (url.to_string(), Some(token.trim().to_string())),
-            None => (w.clone(), None),
-        })
-        .collect();
-    let has_webhooks = !hooks.is_empty();
-
-    eprintln!("Daemon started");
-    if has_webhooks {
-        for (url, token) in &hooks {
-            if token.is_some() {
-                eprintln!("Webhook: {url} (auth: Bearer token)");
-            } else {
-                eprintln!("Webhook: {url}");
-            }
-        }
-    } else {
-        eprintln!("No webhooks configured, events will queue until consumed via get-event/event-handled");
-    }
-    eprintln!("Press Ctrl+C to stop");
-
-    loop {
-        tokio::select! {
-            event = wallet.next_event_async() => {
-                let timestamp = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs();
-
-                let value = serialize_event(&event, timestamp);
-
-                // POST to all webhooks in parallel with retries
-                for (url, token) in &hooks {
-                    let client = client.clone();
-                    let url = url.clone();
-                    let body = value.clone();
-                    let token = token.clone();
-                    tokio::spawn(async move {
-                        let max_retries = 3u32;
-                        for attempt in 0..=max_retries {
-                            let mut req = client.post(&url).json(&body);
-                            if let Some(ref t) = token {
-                                req = req.bearer_auth(t);
-                            }
-                            match req.send().await {
-                                Ok(resp) if resp.status().is_success() => break,
-                                Ok(resp) if resp.status().is_server_error() => {
-                                    if attempt < max_retries {
-                                        let delay = 1u64 << attempt;
-                                        eprintln!("Webhook {url} returned {}, retrying in {delay}s...", resp.status());
-                                        tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
-                                    } else {
-                                        eprintln!("Webhook {url} returned {} after {max_retries} retries, giving up", resp.status());
-                                    }
-                                }
-                                Ok(resp) => {
-                                    // 4xx client errors — don't retry
-                                    eprintln!("Webhook {url} returned {}", resp.status());
-                                    break;
-                                }
-                                Err(e) => {
-                                    if attempt < max_retries {
-                                        let delay = 1u64 << attempt;
-                                        eprintln!("Webhook {url} failed: {e}, retrying in {delay}s...");
-                                        tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
-                                    } else {
-                                        eprintln!("Webhook {url} failed after {max_retries} retries: {e}");
-                                    }
-                                }
-                            }
-                        }
-                    });
-                }
-
-                eprintln!("[{timestamp}] {}", value["type"]);
-
-                // Only auto-ack when webhooks are configured
-                if has_webhooks {
-                    let _ = wallet.event_handled();
-                }
-            }
-            _ = tokio::signal::ctrl_c() => {
-                eprintln!("Shutting down...");
-                break;
-            }
-        }
-    }
-
-    wallet.stop().await;
 }
 
 fn cmd_get_event(wallet: &Wallet) -> Result<serde_json::Value, String> {

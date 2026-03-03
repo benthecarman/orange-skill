@@ -23,3 +23,8 @@ node_id = "021deaa26ce6bb7cc63bd30e83a2bba1c0368269fa3bb9b616a24f40d941ac7d32"
 sync_interval_secs = 60
 prefer_spark_over_lightning = false
 # lnurl_domain = "breez.tips"            # domain for lightning addresses
+
+# Daemon RPC server (used by all non-daemon commands to reach the running daemon)
+[daemon]
+host = "127.0.0.1"
+port = 2884
