@@ -77,6 +77,14 @@ Pass the config path with `--config` (defaults to `config.toml` in the current d
 orange --config /path/to/config.toml <command>
 ```
 
+The daemon config section controls the HTTP API:
+
+```toml
+[daemon]
+host = "127.0.0.1"
+port = 2884
+```
+
 ### Start the daemon and receive your first payment
 
 ```sh
@@ -98,7 +106,9 @@ orange balance
 
 ## Running the Daemon
 
-The daemon is the primary way to run orange. It keeps the wallet online and connected to the Lightning network.
+The daemon is the primary way to run orange. It keeps the wallet online, connected to the Lightning network, and exposes an HTTP API that all other CLI commands use as a client.
+
+When the daemon starts, it binds an [axum](https://github.com/tokio-rs/axum) HTTP server on the configured `[daemon]` host and port (default `127.0.0.1:2884`). Every one-shot command (`balance`, `send`, `transactions`, etc.) is an HTTP request to this server — the CLI is just a thin RPC client.
 
 ```
 orange daemon [--webhook <url> ...]
@@ -212,6 +222,28 @@ orange event-handled
 ```
 
 Call this after you have fully processed the event returned by `get-event`. Do not call this if `get-event` returned `null`.
+
+## Daemon HTTP API
+
+The daemon exposes every wallet operation as an HTTP endpoint on `http://{host}:{port}` (default `http://127.0.0.1:2884`). The CLI commands are thin wrappers around these — you can call them directly from any HTTP client.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/balance` | Get wallet balance |
+| `POST` | `/receive` | Generate invoice (`{"amount_sats": N}` optional) |
+| `GET` | `/receive-offer` | Get reusable BOLT12 offer |
+| `POST` | `/send` | Send payment (`{"payment": "...", "amount_sats": N}`) |
+| `POST` | `/parse` | Parse a payment string |
+| `GET` | `/transactions` | List transaction history |
+| `GET` | `/channels` | List Lightning channels |
+| `GET` | `/info` | Get node/wallet info |
+| `POST` | `/estimate-fee` | Estimate fee for a payment |
+| `GET` | `/lightning-address` | Get registered Lightning address |
+| `POST` | `/register-lightning-address` | Register a Lightning address |
+| `GET` | `/get-event` | Get next pending event |
+| `POST` | `/event-handled` | Acknowledge current event |
+
+All responses are JSON.
 
 ## One-Shot Commands
 
